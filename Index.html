@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>NINJA SHADOW - 3D Puzzle</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{overflow:hidden;background:#0a0a12;font-family:system-ui}
+#canvas{width:100%;height:100vh;display:block}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.top{pointer-events:auto;display:flex;justify-content:space-between;padding:14px;background:linear-gradient(to bottom, rgba(0,0,0,.85), transparent)}
+.logo{color:#fff;font-weight:900;font-size:20px;letter-spacing:2px}.logo span{color:#00ff88}
+.stat{color:#fff;background:rgba(255,255,255,.12);backdrop-filter:blur(10px);padding:7px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.2);font-weight:700;font-size:13px}
+.bottom{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);pointer-events:auto;display:flex;gap:10px;align-items:center}
+.btn{width:56px;height:56px;background:rgba(255,255,255,.14);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.28);border-radius:16px;color:#fff;font-size:22px;display:grid;place-items:center;user-select:none;cursor:pointer}
+.btn:active{background:#00ff88;color:#000;transform:scale(.95)}
+.center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:auto;text-align:center;width:92%;max-width:400px}
+.card{background:rgba(10,15,30,.92);backdrop-filter:blur(20px);border:1px solid rgba(0,255,136,.35);padding:28px;border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.8),0 0 40px rgba(0,255,136,.15)}
+.card h1{color:#fff;font-size:30px;letter-spacing:3px;margin-bottom:6px}.card h1 b{color:#00ff88}
+.card p{color:#9aa0b8;margin:10px 0 18px;line-height:1.5;font-size:14px}
+.play{background:linear-gradient(135deg,#00ff88,#00c853);color:#000;border:none;padding:14px 28px;border-radius:12px;font-weight:900;font-size:15px;letter-spacing:1px;cursor:pointer;width:100%;margin-top:6px}
+.play:hover{transform:scale(1.02)}
+.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}
+.lv{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);padding:10px;border-radius:12px;color:#fff;cursor:pointer;font-size:13px;font-weight:700}
+.lv.active{background:#00ff88;color:#000}
+.hint{color:#5a647e;font-size:11px;margin-top:10px}
+</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+<div class="top"><div class="logo">NINJA <span>SHADOW</span></div><div style="display:flex;gap:6px"><div class="stat" id="moves">Moves: 0</div><div class="stat" id="scrolls">0/3</div></div></div>
+<div class="bottom"><div class="btn" id="up">▲</div><div style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;gap:10px"><div class="btn" id="left">◀</div><div class="btn" id="down">▼</div><div class="btn" id="right">▶</div></div></div><div class="btn" id="reset">↺</div></div>
+<div class="center" id="menu"><div class="card"><h1>NINJA <b>SHADOW</b></h1><p>Ancient temple puzzle. Guide the Shadow Ninja to collect all sacred scrolls. Push stone blocks, avoid red traps. Think 3 steps ahead!</p><div class="levels"><div class="lv active" onclick="setLevel(1)">1. Dojo</div><div class="lv" onclick="setLevel(2)">2. Temple</div><div class="lv" onclick="setLevel(3)">3. Abyss</div></div><button class="play" onclick="startGame()">ENTER TEMPLE - PLAY</button><p class="hint">WASD / Arrows to move - R to reset - Minimum moves wins</p></div></div>
+<div class="center" id="win" style="display:none"><div class="card"><h1 style="color:#00ff88">CLEARED!</h1><p id="winText"></p><button class="play" onclick="nextLevel()">NEXT PUZZLE -></button><button class="play" style="background:transparent;color:#fff;border:1px solid #333" onclick="showMenu()">MENU</button></div></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const canvas=document.getElementById('canvas');
+let scene,camera,renderer,ninja,grid=5,tileSize=1.2;
+let playerPos={x:0,z:0},moves=0,scrolls=[],blocks=[],level=1,gameStarted=false;
+let levelMaps={
+1:{player:{x:0,z:0},scrolls:[{x:2,z:2},{x:-2,z:-2},{x:2,z:-2}],blocks:[{x:0,z:1},{x:1,z:0},{x:-1,z:1}],traps:[]},
+2:{player:{x:-2,z:2},scrolls:[{x:2,z:-2},{x:0,z:0},{x:2,z:2}],blocks:[{x:-1,z:1},{x:0,z:1},{x:1,z:1},{x:1,z:-1}],traps:[{x:0,z:-1}]},
+3:{player:{x:0,z:-2},scrolls:[{x:-2,z:2},{x:2,z:2},{x:0,z:2}],blocks:[{x:-1,z:0},{x:1,z:0},{x:0,z:1},{x:-1,z:1},{x:1,z:1}],traps:[{x:-2,z:0},{x:2,z:0}]}
+};
+function init(){
+scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0a18);scene.fog=new THREE.Fog(0x0a0a18,10,22);
+camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,100);camera.position.set(6,7,6);
+renderer=new THREE.WebGLRenderer({canvas,antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;
+scene.add(new THREE.AmbientLight(0x445588,0.6));
+let dir=new THREE.DirectionalLight(0xffffff,1.2);dir.position.set(5,10,3);dir.castShadow=true;dir.shadow.mapSize.set(2048,2048);scene.add(dir);
+let rim=new THREE.PointLight(0x00ff88,1.2,12);rim.position.set(-3,3,-3);scene.add(rim);
+let floor=new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshStandardMaterial({color:0x151a2a,roughness:0.8}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
+for(let i=-grid;i<=grid;i++){for(let j=-grid;j<=grid;j++){let tile=new THREE.Mesh(new THREE.BoxGeometry(1.08,0.08,1.08), new THREE.MeshStandardMaterial({color:(i+j)%2==0?0x1a2138:0x1f2740}));tile.position.set(i*tileSize,0,j*tileSize);tile.receiveShadow=true;scene.add(tile);}}
+ninja=new THREE.Group();
+let body=new THREE.Mesh(new THREE.CapsuleGeometry(0.25,0.5,4,8), new THREE.MeshStandardMaterial({color:0x0a0a0a}));body.position.y=0.6;body.castShadow=true;ninja.add(body);
+let head=new THREE.Mesh(new THREE.SphereGeometry(0.22,12,12), new THREE.MeshStandardMaterial({color:0x111111}));head.position.y=1.05;head.castShadow=true;ninja.add(head);
+let eye=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.05,0.02), new THREE.MeshStandardMaterial({color:0x00ff88,emissive:0x00ff88,emissiveIntensity:1.5}));eye.position.set(0,1.05,0.18);ninja.add(eye);
+let kat=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.8), new THREE.MeshStandardMaterial({color:0xaaaaaa,metalness:0.8}));kat.position.set(0.3,0.7,0);kat.rotation.z=Math.PI/3;kat.castShadow=true;ninja.add(kat);
+scene.add(ninja);buildLevel(level);animate();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+}
+let blockMeshes=[],scrollMeshes=[],trapMeshes=[];
+function clearLevel(){blockMeshes.forEach(m=>scene.remove(m));scrollMeshes.forEach(m=>scene.remove(m));trapMeshes.forEach(m=>scene.remove(m));blockMeshes=[];scrollMeshes=[];trapMeshes=[];}
+function buildLevel(lv){
+clearLevel();let map=levelMaps[lv];playerPos={...map.player};moves=0;scrolls=map.scrolls.map(s=>({...s,collected:false}));blocks=[...map.blocks];
+map.scrolls.forEach((s,i)=>{let g=new THREE.Group();let base=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.5,6), new THREE.MeshStandardMaterial({color:0x00ff88,emissive:0x00ff88,emissiveIntensity:0.3}));base.position.y=0.35;g.add(base);let top=new THREE.Mesh(new THREE.SphereGeometry(0.14,8,8), new THREE.MeshStandardMaterial({color:0xffd700,emissive:0xffaa00,emissiveIntensity:0.5}));top.position.y=0.7;g.add(top);g.position.set(s.x*tileSize,0,s.z*tileSize);g.userData.idx=i;scene.add(g);scrollMeshes.push(g);});
+blocks.forEach(b=>{let m=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.6,0.9), new THREE.MeshStandardMaterial({color:0x3a425c}));m.position.set(b.x*tileSize,0.3,b.z*tileSize);m.castShadow=true;m.receiveShadow=true;scene.add(m);blockMeshes.push(m);});
+(map.traps||[]).forEach(t=>{let m=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,0.05,6), new THREE.MeshStandardMaterial({color:0xff2233,emissive:0xff0000,emissiveIntensity:0.6}));m.position.set(t.x*tileSize,0.03,t.z*tileSize);scene.add(m);trapMeshes.push(m);});
+updateUI();moveNinjaTo(playerPos,true);
+}
+function moveNinjaTo(pos,instant){
+let target=new THREE.Vector3(pos.x*tileSize,0,pos.z*tileSize);
+if(instant){ninja.position.copy(target);return;}
+let start=ninja.position.clone();let t=0;
+let anim=()=>{t+=0.14;ninja.position.lerpVectors(start,target,t);ninja.position.y=Math.sin(t*Math.PI)*0.35;if(t<1)requestAnimationFrame(anim);else{ninja.position.copy(target);ninja.position.y=0;}};
+anim();
+}
+function canMoveTo(x,z){
+if(Math.abs(x)>grid||Math.abs(z)>grid) return false;
+let trap=levelMaps[level].traps?.find(t=>t.x===x&&t.z===z);if(trap) return 'trap';
+let bi=blocks.findIndex(b=>b.x===x&&b.z===z);
+if(bi!==-1){let dx=x-playerPos.x,dz=z-playerPos.z;let nx=x+dx,nz=z+dz;if(Math.abs(nx)>grid||Math.abs(nz)>grid) return false;if(blocks.find(b=>b.x===nx&&b.z===nz)) return false;if(scrolls.find(s=>!s.collected&&s.x===nx&&s.z===nz)) return false;blocks[bi]={x:nx,z:nz};let mesh=blockMeshes[bi];let s=mesh.position.clone(),e=new THREE.Vector3(nx*tileSize,0.3,nz*tileSize);let tt=0;let ab=()=>{tt+=0.15;mesh.position.lerpVectors(s,e,tt);if(tt<1)requestAnimationFrame(ab);};ab();return true;}
+return true;
+}
+function attemptMove(dx,dz){
+if(!gameStarted) return;let nx=playerPos.x+dx,nz=playerPos.z+dz;let res=canMoveTo(nx,nz);if(!res) return;if(res==='trap'){ninja.position.x+=(Math.random()-0.5)*0.3;return;}
+playerPos={x:nx,z:nz};moves++;moveNinjaTo(playerPos,false);setTimeout(checkCollisions,220);
+}
+function checkCollisions(){
+let idx=scrolls.findIndex(s=>!s.collected&&s.x===playerPos.x&&s.z===playerPos.z);
+if(idx!==-1){scrolls[idx].collected=true;let mesh=scrollMeshes[idx];scene.remove(mesh);let p=new THREE.Mesh(new THREE.RingGeometry(0.1,0.4,16), new THREE.MeshBasicMaterial({color:0x00ff88,transparent:true,opacity:0.8,side:THREE.DoubleSide}));p.position.copy(mesh.position);p.position.y=0.2;p.rotation.x=Math.PI/2;scene.add(p);let ss=0;let aa=()=>{ss+=0.08;p.scale.setScalar(1+ss*2);p.material.opacity=0.8-ss;if(ss<1)requestAnimationFrame(aa);else scene.remove(p);};aa();if(scrolls.every(s=>s.collected)) setTimeout(winLevel,400);}
+updateUI();
+}
+function updateUI(){document.getElementById('moves').innerText='Moves: '+moves;document.getElementById('scrolls').innerText=scrolls.filter(s=>s.collected).length+'/'+scrolls.length;}
+function winLevel(){document.getElementById('win').style.display='block';document.getElementById('winText').innerHTML=`You cleared <b>Level ${level}</b> in <b>${moves}</b> moves!<br>All scrolls collected!`;gameStarted=false;}
+window.setLevel=(l)=>{level=l;document.querySelectorAll('.lv').forEach((e,i)=>e.classList.toggle('active',i+1===l));if(gameStarted) buildLevel(l);};
+window.startGame=()=>{document.getElementById('menu').style.display='none';gameStarted=true;buildLevel(level);};
+window.showMenu=()=>{document.getElementById('win').style.display='none';document.getElementById('menu').style.display='block';gameStarted=false;};
+window.nextLevel=()=>{document.getElementById('win').style.display='none';level=Math.min(3,level+1);setLevel(level);startGame();};
+addEventListener('keydown',e=>{
+if(e.key.toLowerCase()==='r'){buildLevel(level);return;}
+let m={arrowup:[0,-1],arrowdown:[0,1],arrowleft:[-1,0],arrowright:[1,0],w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]}[e.key.toLowerCase()];
+if(m) attemptMove(m[0],m[1]);
+});
+['up','down','left','right'].forEach(d=>{let el=document.getElementById(d);let mp={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};el.addEventListener('touchstart',e=>{e.preventDefault();attemptMove(...mp[d]);});el.addEventListener('click',()=>attemptMove(...mp[d]));});
+document.getElementById('reset').addEventListener('click',()=>buildLevel(level));
+function animate(){requestAnimationFrame(animate);scrollMeshes.forEach(m=>{m.rotation.y+=0.02;m.position.y=Math.sin(Date.now()*0.003+m.position.x)*0.08+0;});if(ninja) camera.lookAt(ninja.position);renderer.render(scene,camera);}
+init();
+</script>
+</body>
+</html>
